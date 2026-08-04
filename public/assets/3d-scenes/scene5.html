@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+	<head>
+		<title>3D Torus Knot - Mandala Color Contrast</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			* { margin: 0; padding: 0; box-sizing: border-box; }
+			body { overflow: hidden; background-color: #000; }
+			canvas { display: block; width: 100vw; height: 100vh; }
+		</style>
+		<!-- 로컬 구동용 Three.js 번들 -->
+		<script src="/three.js"></script>
+	</head>
+	<body>
+
+		<script>
+			let renderer, scene, camera, controls, torusMesh;
+			let bgCanvas, bgCtx, bgTexture;
+			let bgHue = 0;      // 배경 무지개 색상 Hue
+			let mandalaHue = 180; // 물체 만다라 색상 Hue (배경과 대비를 이루도록 보색 이동)
+
+			init();
+
+			function init() {
+				// 1. WebGL 렌더러 생성
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( Math.min(window.devicePixelRatio, 2) );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.toneMapping = THREE.ACESFilmicToneMapping;
+				renderer.toneMappingExposure = 1.3;
+				renderer.setAnimationLoop( render );
+				document.body.appendChild( renderer.domElement );
+
+				scene = new THREE.Scene();
+
+				// 2. 동적 무지개 그라데이션 배경 캔버스
+				bgCanvas = document.createElement('canvas');
+				bgCanvas.width = 2;
+				bgCanvas.height = 512;
+				bgCtx = bgCanvas.getContext('2d');
+				bgTexture = new THREE.CanvasTexture(bgCanvas);
+				
+				updateRainbowBackground(0);
+				scene.background = bgTexture;
+
+				// 3. 다채로운 만다라 반사광 라이팅 (배경과 대비를 키워주는 조명)
+				const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+				scene.add(ambientLight);
+
+				// 주광 (강한 하이라이트)
+				const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+				sunLight.position.set(50, 100, 50);
+				scene.add(sunLight);
+
+				// 보조광 (만다라 핑크/금빛 반사광)
+				const rimLight1 = new THREE.PointLight(0xec4899, 3, 100);
+				rimLight1.position.set(-30, 30, -30);
+				scene.add(rimLight1);
+
+				// 보조광 (만다라 시안/청록 반사광)
+				const rimLight2 = new THREE.PointLight(0x06b6d4, 3, 100);
+				rimLight2.position.set(30, -30, 30);
+				scene.add(rimLight2);
+
+				// 4. 만다라 패브릭/크리스탈 실크 재질 (대비감 및 고광택 확보)
+				const material = new THREE.MeshStandardMaterial({
+					color: 0xffffff,
+					roughness: 0.15,
+					metalness: 0.65,
+					emissive: 0x221133, // 살짝 자체 발광하여 검은 섀도우 우회
+					emissiveIntensity: 0.4
+				});
+
+				torusMesh = new THREE.Mesh(
+					new THREE.TorusKnotGeometry( 1, 0.38, 256, 32, 1, 3 ),
+					material
+				);
+				scene.add( torusMesh );
+
+				// 5. 카메라 및 컨트롤러 세팅
+				camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 500 );
+				camera.position.set( 0.0, 0.0, - 6.0 );
+
+				controls = new THREE.OrbitControls( camera, renderer.domElement );
+				controls.enableDamping = true;
+				controls.dampingFactor = 0.05;
+
+				window.addEventListener( 'resize', onWindowResize );
+			}
+
+			// 배경 무지개 그라데이션 갱신
+			function updateRainbowBackground(h) {
+				const gradient = bgCtx.createLinearGradient(0, 0, 0, 512);
+				
+				const colorTop = `hsl(${h}, 70%, 40%)`;
+				const colorMid = `hsl(${(h + 45) % 360}, 75%, 55%)`;
+				const colorBottom = `hsl(${(h + 90) % 360}, 80%, 70%)`;
+
+				gradient.addColorStop(0.0, colorTop);
+				gradient.addColorStop(0.5, colorMid);
+				gradient.addColorStop(1.0, colorBottom);
+
+				bgCtx.fillStyle = gradient;
+				bgCtx.fillRect(0, 0, 2, 512);
+				bgTexture.needsUpdate = true;
+			}
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+			}
+
+			function render() {
+				// 1. 배경 무지개 회전
+				bgHue = (bgHue + 0.2) % 360;
+				updateRainbowBackground(bgHue);
+
+				// 2. 물체 만다라 색상 변화 (배경색과 반대되는 HSL 색상으로 실시간 대비 연산)
+				mandalaHue = (bgHue + 180) % 360; // 보색(180도 차이)에 기반한 강렬한 대비
+				
+				const mandalaColor = new THREE.Color().setHSL(mandalaHue / 360, 0.85, 0.6);
+				const emissiveColor = new THREE.Color().setHSL((mandalaHue + 60) / 360, 0.9, 0.2);
+
+				torusMesh.material.color.copy(mandalaColor);
+				torusMesh.material.emissive.copy(emissiveColor);
+
+				// 3. 부드러운 회전 운동
+				torusMesh.rotation.y += 0.005;
+				torusMesh.rotation.x += 0.002;
+
+				controls.update();
+				renderer.render( scene, camera );
+			}
+		</script>
+	</body>
+</html>

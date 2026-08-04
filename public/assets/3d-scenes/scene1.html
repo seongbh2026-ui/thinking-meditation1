@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <!-- 모바일 뷰포트 및 스크롤/확대 방지 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cross-Platform 3D Mandala</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #030308;
+      /* 모바일 터치 이벤트 시 스크롤/바운스 방지 */
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Three.js 및 OrbitControls 번들 -->
+  <script src="/three.js"></script>
+
+  <script>
+    // --------------------------------------------------
+    // 1. 모바일 기기 감지 및 씬/카메라 기본 설정
+    // --------------------------------------------------
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x030308, 0.015);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    
+    // 모바일 배터리/발열 보호를 위한 DPI 처리 (모바일은 최대 1.5배수로 제한)
+    const maxDpr = isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2);
+    renderer.setPixelRatio(maxDpr);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.6;
+    document.body.appendChild(renderer.domElement);
+
+    // --------------------------------------------------
+    // 2. 터치 컨트롤 (OrbitControls) 모바일 최적화
+    // --------------------------------------------------
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.rotateSpeed = isMobile ? 0.6 : 0.8; // 모바일 터치는 부드럽게 감도 조절
+    controls.enableZoom = true;
+    controls.zoomSpeed = 0.8;
+
+    // 모바일 세로/가로 화면 비율에 맞춰 카메라 거리 자동 계산 (초기 물체 크기 15% 축소)
+    function adjustCameraPosition() {
+      const aspect = window.innerWidth / window.innerHeight;
+      camera.aspect = aspect;
+      
+      // 세로 화면인 모바일 및 PC 가로 화면 시 카메라 거리를 15% 멀리 설정하여 물체 크기를 15% 작게 표현
+      if (aspect < 1) {
+        camera.position.set(0, 0, 36.8 / aspect); // 32 * 1.15 = 36.8
+      } else {
+        camera.position.set(0, 0, 32.2);          // 28 * 1.15 = 32.2
+      }
+      camera.updateProjectionMatrix();
+    }
+    adjustCameraPosition();
+
+    // --------------------------------------------------
+    // 3. 조명 (Lighting)
+    // --------------------------------------------------
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+    scene.add(ambientLight);
+
+    const centerLight = new THREE.PointLight(0xff0088, 4.5, 45);
+    centerLight.position.set(0, 0, 2);
+    scene.add(centerLight);
+
+    const dirLight = new THREE.DirectionalLight(0x00ffff, 2.2);
+    dirLight.position.set(10, 20, 15);
+    scene.add(dirLight);
+
+    // --------------------------------------------------
+    // 4. 꽃잎 도형 생성 (저사양 모바일 고려 폴리곤 최적화)
+    // --------------------------------------------------
+    function createPetalShape() {
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.bezierCurveTo(0.4, 0.5, 0.8, 1.8, 0, 3.5);
+      shape.bezierCurveTo(-0.8, 1.8, -0.4, 0.5, 0, 0);
+      return shape;
+    }
+
+    const extrudeSettings = {
+      depth: 0.12,
+      bevelEnabled: true,
+      bevelSegments: 2, // 세그먼트를 소폭 줄여 경량화
+      steps: 1,
+      bevelSize: 0.06,
+      bevelThickness: 0.06
+    };
+
+    const petalGeometry = new THREE.ExtrudeGeometry(createPetalShape(), extrudeSettings);
+    petalGeometry.center();
+    petalGeometry.translate(0, 1.75, 0);
+
+    // --------------------------------------------------
+    // 5. 다층 만다라 구축 (메모리 재사용/공유 재질 적용)
+    // --------------------------------------------------
+    const mandalaGroup = new THREE.Group();
+    const layerGroups = [];
+
+    const layerConfigs = [
+      { count: 6,  radius: 1.5, scale: 0.6, z: 0.8, rotSpeed: 0.005,  pulseSpeed: 2.0, baseHue: 0.95 },
+      { count: 12, radius: 3.5, scale: 0.8, z: 0.4, rotSpeed: -0.003, pulseSpeed: 1.5, baseHue: 0.85 },
+      { count: 16, radius: 6.0, scale: 1.1, z: 0.0, rotSpeed: 0.002,  pulseSpeed: 1.2, baseHue: 0.70 },
+      { count: 24, radius: 9.0, scale: 1.3, z: -0.4, rotSpeed: -0.001, pulseSpeed: 0.9, baseHue: 0.55 },
+      { count: 32, radius: 12.5, scale: 1.5, z: -0.8, rotSpeed: 0.0008, pulseSpeed: 0.6, baseHue: 0.40 }
+    ];
+
+    layerConfigs.forEach((config) => {
+      const layerGroup = new THREE.Group();
+
+      // [핵심 최적화] 레이어 전체가 공유할 단 하나의 재질 생성
+      const sharedMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(config.baseHue, 1.0, 0.55),
+        metalness: 0.15,
+        roughness: 0.2,
+        emissive: new THREE.Color().setHSL(config.baseHue, 1.0, 0.25),
+        side: THREE.DoubleSide
+      });
+
+      for (let i = 0; i < config.count; i++) {
+        const angle = (i / config.count) * Math.PI * 2;
+        const petal = new THREE.Mesh(petalGeometry, sharedMaterial);
+
+        petal.position.x = Math.cos(angle) * config.radius;
+        petal.position.y = Math.sin(angle) * config.radius;
+        petal.position.z = config.z;
+
+        petal.rotation.z = angle - Math.PI / 2;
+        petal.rotation.x = 0.25;
+
+        petal.scale.set(config.scale, config.scale, config.scale);
+        layerGroup.add(petal);
+      }
+
+      layerGroup.userData = {
+        material: sharedMaterial, // 애니메이션에서 일괄 제어용
+        rotSpeed: config.rotSpeed,
+        pulseSpeed: config.pulseSpeed,
+        baseHue: config.baseHue
+      };
+
+      mandalaGroup.add(layerGroup);
+      layerGroups.push(layerGroup);
+    });
+
+    // 중앙 발광 코어 (제거됨)
+    // const coreGeo = new THREE.IcosahedronGeometry(1.2, 2);
+    // const coreMat = new THREE.MeshStandardMaterial({
+    //   color: 0xff33aa,
+    //   emissive: 0xff0066,
+    //   emissiveIntensity: 0.8,
+    //   wireframe: true
+    // });
+    // const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+    // mandalaGroup.add(coreMesh);
+
+    scene.add(mandalaGroup);
+
+    // --------------------------------------------------
+    // 6. 애니메이션 (모바일 최적화 프레임 연산)
+    // --------------------------------------------------
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const elapsedTime = clock.getElapsedTime();
+
+      // 전체 기울기
+      mandalaGroup.rotation.x = Math.sin(elapsedTime * 0.3) * 0.12;
+      mandalaGroup.rotation.y = Math.cos(elapsedTime * 0.2) * 0.12;
+
+      // 중앙 코어 (체크 후 회전)
+      if (typeof coreMesh !== 'undefined' && coreMesh) {
+        coreMesh.rotation.x += 0.01;
+        coreMesh.rotation.y += 0.015;
+      }
+
+      // 레이어별 애니메이션
+      layerGroups.forEach((layer, index) => {
+        // 회전 및 호흡
+        layer.rotation.z += layer.userData.rotSpeed;
+        const pulse = 1 + Math.sin(elapsedTime * layer.userData.pulseSpeed + index) * 0.07;
+        layer.scale.set(pulse, pulse, pulse);
+        layer.position.z = Math.sin(elapsedTime * 1.2 + index) * 0.25;
+
+        // [핵심 최적화] 레이어당 단 1번만 색상 업데이트 수행
+        const dynamicHue = (layer.userData.baseHue + elapsedTime * 0.02) % 1;
+        layer.userData.material.color.setHSL(dynamicHue, 0.85, 0.5);
+        layer.userData.material.emissive.setHSL(dynamicHue, 0.9, 0.15);
+      });
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // --------------------------------------------------
+    // 7. 모바일 회전(Orientation) 및 리사이즈 대응
+    // --------------------------------------------------
+    window.addEventListener('resize', () => {
+      adjustCameraPosition();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

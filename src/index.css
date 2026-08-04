@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --c-bg: #050505;
+    --c-accent: #F27D26;
+    --c-glass: rgba(255, 255, 255, 0.05);
+    --c-glass-border: rgba(255, 255, 255, 0.1);
+  }
+  body {
+    background-color: var(--c-bg);
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@keyframes popFade {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-pop-fade {
+  animation: popFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

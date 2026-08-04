@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+	<head>
+		<title>WebGL Morph Target Sphere</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+				outline: none;
+				border: none;
+				-webkit-tap-highlight-color: transparent;
+			}
+			body {
+				overflow: hidden;
+				background-color: #000;
+			}
+			#container {
+				width: 100vw;
+				height: 100vh;
+				display: block;
+			}
+			canvas {
+				display: block;
+				width: 100%;
+				height: 100%;
+				outline: none;
+			}
+		</style>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+		<script>
+			if (typeof THREE === 'undefined') {
+				document.write('<script src="/three.js"><\/script>');
+			}
+		</script>
+	</head>
+	<body>
+
+		<div id="container"></div>
+
+		<script>
+			let camera, scene, renderer, clock;
+			let mesh, points;
+			let sign = 1;
+			
+			// ★ 회전 및 애니메이션 속도 (숫자를 줄일수록 천천히 돕니다)
+			const speed = 0.2; 
+
+			init();
+			animate();
+
+			function createDiscTexture() {
+				const canvas = document.createElement('canvas');
+				canvas.width = 32;
+				canvas.height = 32;
+				const ctx = canvas.getContext('2d');
+
+				ctx.beginPath();
+				ctx.arc(16, 16, 12, 0, 2 * Math.PI, false);
+				ctx.fillStyle = '#ffffff';
+				ctx.fill();
+
+				return new THREE.CanvasTexture(canvas);
+			}
+
+			function init() {
+				const container = document.getElementById('container');
+
+				camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.2, 100);
+				camera.position.set(0, 3, 5);
+
+				scene = new THREE.Scene();
+				clock = new THREE.Clock();
+
+				const light1 = new THREE.PointLight(0xff007f, 6, 100);
+				light1.position.set(10, 10, 10);
+				scene.add(light1);
+
+				const light2 = new THREE.PointLight(0x00f5d4, 6, 100);
+				light2.position.set(-10, -10, -10);
+				scene.add(light2);
+
+				const light3 = new THREE.PointLight(0xffb703, 5, 100);
+				light3.position.set(0, 15, -10);
+				scene.add(light3);
+
+				scene.add(new THREE.AmbientLight(0x555555));
+
+				const geometry = new THREE.SphereGeometry(1.2, 64, 64);
+				const pos = geometry.attributes.position;
+
+				const morphPos1 = [];
+				const morphPos2 = [];
+
+				for (let i = 0; i < pos.count; i++) {
+					const x = pos.getX(i);
+					const y = pos.getY(i);
+					const z = pos.getZ(i);
+
+					const wave = 1 + 0.3 * Math.sin(y * 8) * Math.cos(x * 8);
+					morphPos1.push(x * wave, y * wave, z * wave);
+
+					const spike = 1 + 0.25 * Math.sin(x * 12) * Math.sin(z * 12);
+					morphPos2.push(x * spike, y * spike, z * spike);
+				}
+
+				geometry.morphAttributes.position = [];
+				geometry.morphAttributes.position[0] = new THREE.Float32BufferAttribute(morphPos1, 3);
+				geometry.morphAttributes.position[1] = new THREE.Float32BufferAttribute(morphPos2, 3);
+
+				const material = new THREE.MeshStandardMaterial({
+					color: 0xffffff,
+					roughness: 0.1,
+					metalness: 0.8,
+					morphTargets: true
+				});
+
+				mesh = new THREE.Mesh(geometry, material);
+				scene.add(mesh);
+
+				const pointsMaterial = new THREE.PointsMaterial({
+					size: 6,
+					sizeAttenuation: false,
+					map: createDiscTexture(),
+					alphaTest: 0.5,
+					transparent: true,
+					morphTargets: true
+				});
+
+				points = new THREE.Points(geometry, pointsMaterial);
+				points.morphTargetInfluences = mesh.morphTargetInfluences;
+				mesh.add(points);
+
+				renderer = new THREE.WebGLRenderer({ antialias: true });
+				renderer.setPixelRatio(window.devicePixelRatio);
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				container.appendChild(renderer.domElement);
+
+				const controls = new THREE.OrbitControls(camera, renderer.domElement);
+				controls.minDistance = 1;
+				controls.maxDistance = 20;
+
+				window.addEventListener('resize', onWindowResize);
+			}
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			}
+
+			function animate() {
+				requestAnimationFrame(animate);
+
+				const delta = clock.getDelta();
+
+				if (mesh) {
+					const step = delta * speed;
+					
+					// 자체 Y축 회전 (천천히 돌도록 설정)
+					mesh.rotation.y += step * 0.4;
+
+					// Morph Target 모양 변형 애니메이션
+					mesh.morphTargetInfluences[0] += step * sign;
+
+					if (mesh.morphTargetInfluences[0] >= 1) {
+						mesh.morphTargetInfluences[0] = 1;
+						sign = -1;
+					} else if (mesh.morphTargetInfluences[0] <= 0) {
+						mesh.morphTargetInfluences[0] = 0;
+						sign = 1;
+					}
+
+					mesh.morphTargetInfluences[1] = 1 - mesh.morphTargetInfluences[0];
+				}
+
+				renderer.render(scene, camera);
+			}
+		</script>
+	</body>
+</html>

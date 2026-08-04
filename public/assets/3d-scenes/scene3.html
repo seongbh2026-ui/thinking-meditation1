@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <title>3D Mandala Water Drop Sculpture</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background-color: #020208; font-family: sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; }
+    </style>
+    <!-- Three.js 번들 -->
+    <script src="/three.js"></script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <script>
+        let scene, camera, renderer;
+        let mandalaDropSculpture;
+
+        // 마우스 반응형 변수
+        let mouseX = 0, mouseY = 0;
+        let targetCameraX = 0, targetCameraY = 0;
+        const windowHalfX = window.innerWidth / 2;
+        const windowHalfY = window.innerHeight / 2;
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 렌더러 설정
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // 카메라 설정
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 2000);
+            camera.position.set(0, 40, 350);
+
+            // 씬 & 신비로운 밤하늘 안개
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x020208, 0.0012);
+
+            // 만다라 조명 연출 (핑크, 보라, 시안, 금색 다채로운 반사광)
+            const ambientLight = new THREE.AmbientLight(0x4c1d95, 2.2);
+            scene.add(ambientLight);
+
+            // 1. 상단 메인 조명 (화려한 핫핑크/자색)
+            const pinkLight = new THREE.DirectionalLight(0xff007f, 3.8);
+            pinkLight.position.set(150, 300, 150);
+            scene.add(pinkLight);
+
+            // 2. 하단 측면 조명 (시안/청록색 포인트)
+            const cyanLight = new THREE.PointLight(0x00e5ff, 4.5, 600);
+            cyanLight.position.set(-150, -100, 100);
+            scene.add(cyanLight);
+
+            // 3. 중앙 골드 포인트 조명
+            const goldLight = new THREE.PointLight(0xffb703, 3.8, 500);
+            goldLight.position.set(100, 100, -100);
+            scene.add(goldLight);
+
+            // 물방울 조형물 생성 및 씬 추가
+            mandalaDropSculpture = createMandalaWaterDrop();
+            scene.add(mandalaDropSculpture);
+
+            // 마우스 및 창 크기 변경 이벤트
+            document.addEventListener('mousemove', onDocumentMouseMove);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // 이미지의 물방울 구조 + 만다라 컬러 재현 함수
+        function createMandalaWaterDrop() {
+            const group = new THREE.Group();
+
+            // 만다라 재질 패밀리 (층별로 다채로운 반사 및 반투명감 지정)
+            const createMandalaMat = (colorHex, emissiveHex) => new THREE.MeshPhongMaterial({
+                color: colorHex,
+                emissive: emissiveHex,
+                specular: 0xffffff,
+                shininess: 100,
+                transparent: true,
+                opacity: 0.9,
+                side: THREE.DoubleSide
+            });
+
+            const matPink = createMandalaMat(0xff1493, 0x831843);
+            const matPurple = createMandalaMat(0x9d4edd, 0x4c1d95);
+            const matCyan = createMandalaMat(0x00f5d4, 0x164e63);
+            const matGold = createMandalaMat(0xffb703, 0x78350f);
+
+            // 만다라 느낌을 내는 섬세한 와이어프레임 재질
+            const createWireMat = (colorHex) => new THREE.LineBasicMaterial({
+                color: colorHex,
+                transparent: true,
+                opacity: 0.35
+            });
+
+            // 1. 하단 물결 파동 (Water Ripple Base - 만다라 핑크/보라)
+            const ringGeo = new THREE.RingGeometry(5, 95, 64, 12);
+            ringGeo.rotateX(-Math.PI / 2);
+            const pos = ringGeo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const z = pos.getZ(i);
+                const dist = Math.sqrt(x*x + z*z);
+                pos.setY(i, Math.sin(dist * 0.15) * 4.5);
+            }
+            ringGeo.computeVertexNormals();
+            const ringMesh = new THREE.Mesh(ringGeo, matPurple);
+            ringMesh.position.y = -60;
+            group.add(ringMesh);
+
+            const ringWire = new THREE.LineSegments(new THREE.WireframeGeometry(ringGeo), createWireMat(0xec4899));
+            ringWire.position.y = -60;
+            group.add(ringWire);
+
+            // 2. 중간 왕관형 물보라 (Splash Crown Disk - 시안/보라 만다라)
+            const crownGeo = new THREE.CylinderGeometry(58, 10, 9, 36, 6, true);
+            const crownPos = crownGeo.attributes.position;
+            for (let i = 0; i < crownPos.count; i++) {
+                const y = crownPos.getY(i);
+                if (y > 0) {
+                    const angle = Math.atan2(crownPos.getZ(i), crownPos.getX(i));
+                    const spike = Math.sin(angle * 16) * 7;
+                    crownPos.setX(i, crownPos.getX(i) + spike);
+                    crownPos.setZ(i, crownPos.getZ(i) + spike);
+                    crownPos.setY(i, y + Math.sin(angle * 16) * 3.5);
+                }
+            }
+            crownGeo.computeVertexNormals();
+            const crownMesh = new THREE.Mesh(crownGeo, matCyan);
+            crownMesh.position.y = 0;
+            group.add(crownMesh);
+
+            const crownWire = new THREE.LineSegments(new THREE.WireframeGeometry(crownGeo), createWireMat(0x67e8f9));
+            crownWire.position.y = 0;
+            group.add(crownWire);
+
+            // 3. 중앙 얇은 물 줄기 (Vertical Stem - 골드)
+            const stemGeo = new THREE.CylinderGeometry(1.5, 3, 90, 16);
+            const stemMesh = new THREE.Mesh(stemGeo, matGold);
+            stemMesh.position.y = 25;
+            group.add(stemMesh);
+
+            // 4. 상단 종/우산 모양 물방울 (Top Bell/Drop Shape - 핫핑크 만다라)
+            const topGeo = new THREE.ConeGeometry(24, 38, 36, 16, true);
+            const topPos = topGeo.attributes.position;
+            for (let i = 0; i < topPos.count; i++) {
+                const y = topPos.getY(i);
+                const factor = Math.cos((y / 38) * Math.PI);
+                topPos.setX(i, topPos.getX(i) * (1 + factor * 0.55));
+                topPos.setZ(i, topPos.getZ(i) * (1 + factor * 0.55));
+            }
+            topGeo.computeVertexNormals();
+            const topMesh = new THREE.Mesh(topGeo, matPink);
+            topMesh.position.y = 80;
+            topMesh.rotation.z = Math.PI;
+            group.add(topMesh);
+
+            const topWire = new THREE.LineSegments(new THREE.WireframeGeometry(topGeo), createWireMat(0xf472b6));
+            topWire.position.y = 80;
+            topWire.rotation.z = Math.PI;
+            group.add(topWire);
+
+            // 5. 최상단 물방울 꼭지 (Gold Core Drop)
+            const tipGeo = new THREE.SphereGeometry(4.5, 16, 16);
+            tipGeo.scale(1, 1.8, 1);
+            const tipMesh = new THREE.Mesh(tipGeo, matGold);
+            tipMesh.position.y = 104;
+            group.add(tipMesh);
+
+            return group;
+        }
+
+        // 마우스 이동 처리
+        function onDocumentMouseMove(event) {
+            mouseX = (event.clientX - windowHalfX);
+            mouseY = (event.clientY - windowHalfY);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 마우스 반응형 시점 회전 (부드러운 추종)
+            targetCameraX = mouseX * 0.65;
+            targetCameraY = -mouseY * 0.65 + 30;
+
+            camera.position.x += (targetCameraX - camera.position.x) * 0.03;
+            camera.position.y += (targetCameraY - camera.position.y) * 0.03;
+            camera.lookAt(0, 25, 0);
+
+            // 아주 천천히 명상적인 자전 회전
+            const slowTime = performance.now() * 0.0002;
+            mandalaDropSculpture.rotation.y = slowTime;
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

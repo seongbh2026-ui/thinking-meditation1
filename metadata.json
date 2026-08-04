@@ -1,0 +1,6 @@
+{
+  "name": "Thinking Meditation",
+  "description": "A meditation training program using 3D visualization, countdown intervals, and cognitive recall exercises.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

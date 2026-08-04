@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>3D 구형 파스텔 만다라 (세밀화 모드)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background-color: #0b0d14;
+      display: flex; justify-content: center; align-items: center;
+      touch-action: none;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="sphereCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('sphereCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let width, height, dpr;
+    let rotX = 0.2, rotY = 0.4;
+    let targetRotX = 0.2, targetRotY = 0.4;
+    let isDragging = false, lastX = 0, lastY = 0;
+    let time = 0;
+
+    // 선명하고 높은 채도의 만다라 팔레트
+    const PALETTE = {
+      pink:     '#ff3385', // 비비드 핫핑크
+      jade:     '#00e676', // 에메랄드 그린
+      gold:     '#ffc400', // 리치 골드
+      blue:     '#00b0ff', // 일렉트릭 블루
+      lavender: '#d500f9', // 바이올렛 딥
+      ivory:    '#ffffff', // 순백색
+      roseGold: '#ff6e40', // 코랄 오렌지
+      mint:     '#00e5ff'  // 자안 시안
+    };
+
+    function resize() {
+      dpr = window.devicePixelRatio || 1;
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // 마우스 & 터치 회전 인터랙션
+    window.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      targetRotY += dx * 0.005; // 드래그 회전 감도 조절
+      targetRotX += dy * 0.005;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+
+    window.addEventListener('pointerup', () => isDragging = false);
+
+    // 3D 회전 및 투영 함수
+    function project(x, y, z) {
+      // Y축 회전
+      let x1 = x * Math.cos(rotY) + z * Math.sin(rotY);
+      let z1 = -x * Math.sin(rotY) + z * Math.cos(rotY);
+
+      // X축 회전
+      let y2 = y * Math.cos(rotX) - z1 * Math.sin(rotX);
+      let z2 = y * Math.sin(rotX) + z1 * Math.cos(rotX);
+
+      const fov = 550;
+      const scale = fov / (fov + z2 + 200);
+      return {
+        x: width / 2 + x1 * scale,
+        y: height / 2 + y2 * scale,
+        scale: scale,
+        z: z2
+      };
+    }
+
+    // 메인 렌더링 루프
+    function render() {
+      time += 0.008; // 은은하고 정교한 회전 속도
+
+      // 관성 회전 물리 연산
+      rotX += (targetRotX - rotX) * 0.05;
+      rotY += (targetRotY - rotY) * 0.05;
+
+      ctx.clearRect(0, 0, width, height);
+
+      // 1. 은은한 갤러리 배경 그라데이션
+      const bgGrad = ctx.createRadialGradient(width/2, height/2, 50, width/2, height/2, Math.max(width, height)*0.6);
+      bgGrad.addColorStop(0, '#161b26');
+      bgGrad.addColorStop(1, '#06070a');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, width, height);
+
+      const renderList = [];
+      
+      // 화면 크기에 맞춘 구체 반지름 확장 연산 (기존 110에서 대폭 확대)
+      const sphereRadius = Math.min(width, height) * 0.38; 
+
+      // -------------------------------------------------------------
+      // [세밀화 요소 1] 다중 기하학적 만다라 고리 (Rings) - 16개로 확장
+      // -------------------------------------------------------------
+      const ringCount = 16;
+      for (let r = 0; r < ringCount; r++) {
+        const ringAngle = (r / ringCount) * Math.PI;
+        const pts = [];
+        const steps = 96; // 고리 해상도 대폭 증가
+
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * Math.PI * 2;
+          let x = Math.cos(t) * sphereRadius;
+          let y = Math.sin(t) * sphereRadius * Math.cos(ringAngle);
+          let z = Math.sin(t) * sphereRadius * Math.sin(ringAngle);
+
+          pts.push(project(x, y, z));
+        }
+
+        const avgZ = pts.reduce((sum, p) => sum + p.z, 0) / pts.length;
+        const colors = [PALETTE.gold, PALETTE.jade, PALETTE.lavender, PALETTE.roseGold];
+
+        renderList.push({
+          type: 'ring',
+          z: avgZ,
+          pts: pts,
+          color: colors[r % colors.length],
+          lineWidth: (r % 3 === 0) ? 1.8 : 0.9 // 고리 두께에 변주 부여
+        });
+      }
+
+      // -------------------------------------------------------------
+      // [세밀화 요소 2] 피보나치 구체 노드 & 섬세한 꽃잎 (Nodes & Petals) - 120개로 증설
+      // -------------------------------------------------------------
+      const nodeCount = 120;
+      const phi = (1 + Math.sqrt(5)) / 2; // 황금비
+
+      for (let i = 0; i < nodeCount; i++) {
+        const y = 1 - (i / (nodeCount - 1)) * 2;
+        const radiusAtY = Math.sqrt(1 - y * y);
+        const theta = 2 * Math.PI * i / phi + time * 0.15;
+
+        const x = Math.cos(theta) * radiusAtY * sphereRadius;
+        const z = Math.sin(theta) * radiusAtY * sphereRadius;
+        const py = y * sphereRadius;
+
+        const p3d = project(x, py, z);
+        const colorList = [PALETTE.pink, PALETTE.blue, PALETTE.lavender, PALETTE.mint, PALETTE.roseGold];
+        const nodeColor = colorList[i % colorList.length];
+
+        renderList.push({
+          type: 'node',
+          z: p3d.z,
+          p3d: p3d,
+          color: nodeColor,
+          index: i
+        });
+      }
+
+      // Z-Buffer (깊이감 정렬)
+      renderList.sort((a, b) => b.z - a.z);
+
+      // -------------------------------------------------------------
+      // 실제 3D 렌더링 수행
+      // -------------------------------------------------------------
+      renderList.forEach(item => {
+        // 투명도 (깊이에 따라 은은하게 감쇄)
+        const alpha = Math.min(Math.max((item.z + sphereRadius * 1.5) / (sphereRadius * 3), 0.15), 0.95);
+
+        if (item.type === 'ring') {
+          ctx.beginPath();
+          item.pts.forEach((pt, idx) => {
+            if (idx === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+          });
+          ctx.strokeStyle = item.color;
+          ctx.globalAlpha = alpha * 0.55;
+          ctx.lineWidth = item.lineWidth;
+          ctx.stroke();
+        } 
+        else if (item.type === 'node') {
+          ctx.save();
+          ctx.globalAlpha = alpha;
+
+          const size = (8 + (item.index % 5) * 2) * item.p3d.scale;
+
+          // 1) 파스텔 연꽃 노드 본체
+          ctx.beginPath();
+          ctx.arc(item.p3d.x, item.p3d.y, size, 0, Math.PI * 2);
+          ctx.fillStyle = item.color;
+          ctx.fill();
+
+          // 2) 세밀한 금빛 테두리 라인
+          ctx.strokeStyle = PALETTE.gold;
+          ctx.lineWidth = 0.8 * item.p3d.scale;
+          ctx.stroke();
+
+          // 3) 노드 중앙 미세 상아색 정점 핀 (세밀한 그래픽 디테일)
+          ctx.beginPath();
+          ctx.arc(item.p3d.x, item.p3d.y, size * 0.3, 0, Math.PI * 2);
+          ctx.fillStyle = PALETTE.ivory;
+          ctx.fill();
+
+          ctx.restore();
+        }
+      });
+
+      ctx.globalAlpha = 1.0;
+      requestAnimationFrame(render);
+    }
+
+    render();
+  </script>
+</body>
+</html>
