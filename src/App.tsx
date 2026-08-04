@@ -9,6 +9,7 @@ import { eventBus } from './core/eventBus';
 import { startMeditation, stopMeditation } from './modules/timerEngine';
 import { initAudio, stopAudio } from './modules/audioEngine';
 import { loadScene } from './modules/sceneManager';
+import { requestWakeLock, releaseWakeLock } from './modules/wakeLock';
 import { SettingsUI } from './components/SettingsUI';
 import { OverlayUI } from './components/OverlayUI';
 import { QuizUI } from './components/QuizUI';
@@ -22,14 +23,28 @@ export default function App() {
   useEffect(() => {
     initAudio();
     eventBus.on('SESSION_END', () => {
+      releaseWakeLock();
       setIsRunning(false);
       setShowQuiz(true);
     });
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && store.getState().isRunning) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const handleStart = () => {
     const state = store.getState();
     if (state.settings) {
+      requestWakeLock();
       loadScene(state.settings.sceneId);
       startMeditation(state.settings.durationMinutes, state.settings.intervalSeconds);
       setIsRunning(true);
@@ -38,6 +53,7 @@ export default function App() {
   };
 
   const handleBack = () => {
+    releaseWakeLock();
     stopMeditation();
     stopAudio();
     setIsRunning(false);
