@@ -118,10 +118,15 @@ export const IntroSplashUI: React.FC<IntroSplashProps> = ({ onEnter }) => {
         </p>
 
         {/* 하단 아무 키나 누르세요 안내 뱃지 */}
-        <div className="inline-flex items-center gap-2 bg-white/10 border border-white/30 px-6 py-3.5 rounded-full text-xs sm:text-sm font-extrabold text-pink-200 animate-pulse shadow-lg">
+        <div className="inline-flex items-center gap-2 bg-white/10 border border-white/30 px-6 py-3.5 rounded-full text-xs sm:text-sm font-extrabold text-pink-200 animate-pulse shadow-lg mb-4">
           <span>✨</span>
           <span>아무 키나 누르거나 화면을 터치하세요</span>
           <span>✨</span>
+        </div>
+
+        {/* 버전 및 업데이트 적용 확인용 태그 */}
+        <div className="text-[11px] text-gray-300/80 font-mono tracking-wider bg-black/40 border border-white/10 px-3 py-1 rounded-md inline-block">
+          v2.5 Audio Sprite (Howler.js + PCM Precise Sync Applied)
         </div>
       </div>
     </div>
