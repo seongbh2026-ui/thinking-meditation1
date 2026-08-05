@@ -3,6 +3,7 @@ import { eventBus } from '../core/eventBus';
 
 let audioCtx: AudioContext | null = null;
 const bufferCache = new Map<string, AudioBuffer>();
+const htmlAudioCache = new Map<string, HTMLAudioElement>();
 let activeSourceNode: AudioBufferSourceNode | null = null;
 let currentHtmlAudio: HTMLAudioElement | null = null;
 let isAudioInited = false;
@@ -25,7 +26,7 @@ export function getAudioContext(): AudioContext | null {
   return audioCtx;
 }
 
-// Safari 및 모바일 호환 decodeAudioData 래퍼 (Promise & Callback 겸용)
+// Safari 및 모바일 호환 decodeAudioData 래퍼
 function decodeAudioDataSafely(ctx: AudioContext, arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
   return new Promise((resolve, reject) => {
     try {
@@ -44,45 +45,10 @@ function decodeAudioDataSafely(ctx: AudioContext, arrayBuffer: ArrayBuffer): Pro
   });
 }
 
-// 💡 서버로부터 핵심 MP3 오디오 리소스 사전 로딩 & 캐싱 (최우선 MP3 출력 보장)
-export async function preloadAudioAssets(voiceType: 'male' | 'female' = 'male', forceRefresh = false): Promise<void> {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
-  const folder = voiceType === 'male' ? 'male' : 'female';
-  const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
-
-  // 1초~30초 및 40~100, 알파벳 등 핵심 카운팅 MP3 음성 사전 프리패치
-  const sampleLabels: string[] = [];
-  for (let i = 1; i <= 30; i++) sampleLabels.push(String(i));
-  sampleLabels.push('40', '50', '60', '70', '80', '90', '100', 'A', 'B', 'C', 'D', 'E');
-
-  await Promise.allSettled(
-    sampleLabels.map(async (label) => {
-      const path = `/audio/${folder}/${prefix}_${label}.mp3`;
-      if (!forceRefresh && bufferCache.has(path)) return;
-
-      try {
-        const fetchOptions: RequestInit = forceRefresh ? { cache: 'reload' } : {};
-        const res = await fetch(path, fetchOptions);
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && !contentType.includes('text/html')) {
-          const arrayBuffer = await res.arrayBuffer();
-          const decoded = await decodeAudioDataSafely(ctx, arrayBuffer);
-          bufferCache.set(path, decoded);
-        }
-      } catch {
-        // ignore preload error
-      }
-    })
-  );
-}
-
-// 💡 모바일 디바이스 오디오 세션 즉시 활성화 (Unmute / Warm-up / Resume)
+// 💡 모바일 디바이스 오디오 세션 즉시 활성화 (Unmute / Warm-up)
 export function unlockAudio(): void {
   if (typeof window === 'undefined') return;
 
-  // 1. Web Audio API Context Resume & Silent Buffer Playback
   const ctx = getAudioContext();
   if (ctx) {
     if (ctx.state === 'suspended') {
@@ -99,20 +65,7 @@ export function unlockAudio(): void {
     }
   }
 
-  // 2. Web Speech API (SpeechSynthesis) Warm-up
-  if ('speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.cancel();
-      const dummyUtterance = new SpeechSynthesisUtterance(' ');
-      dummyUtterance.volume = 0.001;
-      dummyUtterance.rate = 2.0;
-      window.speechSynthesis.speak(dummyUtterance);
-    } catch {
-      // ignore
-    }
-  }
-
-  // 3. HTML5 Audio Element Session Unmute (iOS Safari / 카카오톡 인앱 브라우저 호환)
+  // HTML5 Audio Element Session Unmute (iOS Safari / 카카오톡 인앱 브라우저 호환)
   try {
     const dummyAudio = new Audio();
     dummyAudio.volume = 0.001;
@@ -132,30 +85,61 @@ export function unlockAudio(): void {
   isAudioUnlocked = true;
 }
 
-// 💡 명상 프로그램 실행 시 오디오 엔진 전면 재초기화 및 서버 동기화
-export function prepareAudioForSession(voiceType: 'male' | 'female' = 'male'): void {
-  // 0. 기존 오디오 캐시 전면 초기화 (이전 세션의 찌꺼기 방지)
-  bufferCache.clear();
+// 💡 첨부된 모든 MP3 파일들을 서버로부터 사전 로딩 및 캐시 구축 (완전 동기/비동기 프리로드)
+export async function preloadAudioAssets(voiceType: 'male' | 'female' = 'male'): Promise<void> {
+  const ctx = getAudioContext();
+  if (!ctx) return;
 
-  // 1. 오디오 세션 언락
+  const folder = voiceType === 'male' ? 'male' : 'female';
+  const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
+
+  const sampleLabels: string[] = [];
+  for (let i = 1; i <= 100; i++) sampleLabels.push(String(i));
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].forEach(l => sampleLabels.push(l));
+
+  await Promise.allSettled(
+    sampleLabels.map(async (label) => {
+      const path = `/audio/${folder}/${prefix}_${label}.mp3`;
+      
+      // 1. HTMLAudioElement 캐시
+      if (!htmlAudioCache.has(path)) {
+        const audio = new Audio(path);
+        audio.preload = 'auto';
+        audio.load();
+        htmlAudioCache.set(path, audio);
+      }
+
+      // 2. Web Audio Buffer 캐시
+      if (!bufferCache.has(path)) {
+        try {
+          const res = await fetch(path);
+          if (res.ok) {
+            const arrayBuffer = await res.arrayBuffer();
+            const decoded = await decodeAudioDataSafely(ctx, arrayBuffer);
+            bufferCache.set(path, decoded);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    })
+  );
+}
+
+// 💡 명상 프로그램 시작 직전 호출 (Promise를 반환하여 완전 로딩 보장 후 카운트다운 시작)
+export async function prepareAudioForSession(voiceType: 'male' | 'female' = 'male'): Promise<void> {
   unlockAudio();
 
-  // 2. AudioContext 재개
   const ctx = getAudioContext();
   if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
+    await ctx.resume().catch(() => {});
   }
 
-  // 3. MP3 음성 파일 서버로부터 새로 백그라운드 프리패치
-  preloadAudioAssets(voiceType, true);
+  await preloadAudioAssets(voiceType);
 }
 
 // 기존 재생 중인 소리 중단
 export function stopAudio(): void {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-  }
-
   if (activeSourceNode) {
     try {
       activeSourceNode.stop();
@@ -177,65 +161,8 @@ export function stopAudio(): void {
   }
 }
 
-// 💡 최후의 보루: Web Speech API (MP3 오디오 파일이 전혀 응답하지 않을 때만 극단적 Fallback)
-const playSpeechFallback = (label: string, isAlphabet: boolean) => {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-  stopAudio();
-
-  const isNumber = /^\d+$/.test(label);
-  const utterance = new SpeechSynthesisUtterance(label);
-  utterance.lang = isAlphabet ? 'en-US' : 'ko-KR';
-  utterance.rate = isNumber ? 0.85 : 0.9;
-  utterance.pitch = isNumber ? 1.1 : 1.0;
-  utterance.volume = 1.0;
-
-  window.speechSynthesis.speak(utterance);
-};
-
-// 💡 HTML5 Audio MP3 재생 (2차 최우선 수단 - MP3 재생 실패 시 1회 재시도 후 최후에만 SpeechSynthesis로 전이)
-const playHtmlAudioFallback = (path: string, label: string, isAlphabet: boolean) => {
-  stopAudio();
-  const audio = new Audio(path);
-  audio.volume = 1.0;
-  currentHtmlAudio = audio;
-
-  let retryAttempted = false;
-
-  const handleFailure = () => {
-    if (!retryAttempted) {
-      retryAttempted = true;
-      // MP3 파일 재생 1회 재시도 (캐시 우회 쿼리스트링 추가)
-      try {
-        audio.src = `${path}?t=${Date.now()}`;
-        audio.load();
-        const pRetry = audio.play();
-        if (pRetry !== undefined) {
-          pRetry.catch(() => {
-            // 정 안될 때만 최후의 보루로 음성 생성(Web Speech API) 호출
-            playSpeechFallback(label, isAlphabet);
-          });
-        }
-      } catch {
-        playSpeechFallback(label, isAlphabet);
-      }
-    } else {
-      playSpeechFallback(label, isAlphabet);
-    }
-  };
-
-  audio.onerror = handleFailure;
-
-  const p = audio.play();
-  if (p !== undefined) {
-    p.catch(handleFailure);
-  }
-};
-
-// 💡 메인 음성 출력 함수 (MP3 파일 재생이 무조건 1~2순위 최우선)
-// [1순위] Web Audio API + GainNode(2.5x 증폭) MP3 재생
-// [2순위] HTML5 Audio element MP3 재생 (재시도 포함)
-// [3순위 (최후의 보루)] Web Speech API (MP3 파일 재생 불가능 시)
-const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') => {
+// 💡 메인 음성 출력 함수 (메모리 캐시에서 즉시 재생하여 모바일 지연 및 차단 방지)
+const playSound = (label: string, voiceType: 'male' | 'female' | 'mute') => {
   if (voiceType === 'mute') {
     stopAudio();
     return;
@@ -243,7 +170,6 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
 
   stopAudio();
 
-  // 사용자 터치/클릭 오디오락 자동 언락 시도
   if (!isAudioUnlocked) {
     unlockAudio();
   }
@@ -251,44 +177,20 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
   const folder = voiceType === 'male' ? 'male' : 'female';
   const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
   const path = `/audio/${folder}/${prefix}_${label}.mp3`;
-  const isAlphabet = /^[A-Z]$/i.test(label);
   const isNumber = /^\d+$/.test(label);
 
   const ctx = getAudioContext();
 
-  // [1순위] Web Audio API를 통한 MP3 오디오 버퍼 정밀 재생
-  if (ctx) {
+  // 1순위: Web Audio API Buffer 메모리 재생 (지연 0초, 가장 확실함)
+  if (ctx && bufferCache.has(path)) {
     if (ctx.state === 'suspended') {
-      try {
-        await ctx.resume();
-      } catch {
-        // ignore
-      }
+      ctx.resume().catch(() => {});
     }
-
     try {
-      let buffer = bufferCache.get(path);
-      if (!buffer) {
-        let res = await fetch(path);
-        
-        // 1차 패치 실패 시 캐시 무시(Bypass Cache) 옵션으로 강력하게 재요청
-        if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) {
-          res = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-cache' });
-        }
-
-        const contentType = res.headers.get('content-type') || '';
-        if (!res.ok || contentType.includes('text/html')) {
-          throw new Error(`Invalid audio response: ${res.status}`);
-        }
-        const arrayBuffer = await res.arrayBuffer();
-        buffer = await decodeAudioDataSafely(ctx, arrayBuffer);
-        bufferCache.set(path, buffer);
-      }
-
+      const buffer = bufferCache.get(path)!;
       const source = ctx.createBufferSource();
       source.buffer = buffer;
 
-      // 숫자 음성일 경우 2.5배 음량 증폭 GainNode 적용
       const gainNode = ctx.createGain();
       gainNode.gain.value = isNumber ? 2.5 : 1.2;
 
@@ -297,26 +199,46 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
 
       activeSourceNode = source;
       source.start(0);
-      return; // 1순위 MP3 재생 성공 시 즉시 종료
+      return;
     } catch {
-      // Web Audio 재생 실패 시 2순위 HTML5 Audio MP3 재생으로 이동
+      // fallback
     }
   }
 
-  // [2순위] HTML5 Audio MP3 파일 재생 (실패 시 1회 reload 후 재생 시도, 최후에만 SpeechSynthesis전이)
-  playHtmlAudioFallback(path, label, isAlphabet);
+  // 2순위: HTMLAudioElement 캐시 재생
+  let audio = htmlAudioCache.get(path);
+  if (!audio) {
+    audio = new Audio(path);
+    htmlAudioCache.set(path, audio);
+  }
+
+  audio.currentTime = 0;
+  audio.volume = isNumber ? 1.0 : 0.9;
+  currentHtmlAudio = audio;
+
+  const playPromise = audio.play();
+  if (playPromise !== undefined) {
+    playPromise.catch(() => {
+      try {
+        const fallbackAudio = new Audio(path);
+        fallbackAudio.volume = 1.0;
+        currentHtmlAudio = fallbackAudio;
+        fallbackAudio.play().catch(() => {});
+      } catch {
+        // ignore
+      }
+    });
+  }
 };
 
-// 웹 앱 초기화 시 오디오 엔진 준비 & 전역 이벤트 바인딩
+// 앱 초기화 시 최초 오디오 엔진 바인딩
 export const initAudio = () => {
   if (isAudioInited) return;
   isAudioInited = true;
 
-  // 1. AudioContext 객체 미리 할당 및 MP3 샘플 사전 로딩
   getAudioContext();
   preloadAudioAssets('male');
 
-  // 2. 화면 터치/클릭 시 오디오 세션 언락
   const handleFirstInteraction = () => {
     unlockAudio();
     window.removeEventListener('pointerdown', handleFirstInteraction);
@@ -332,7 +254,6 @@ export const initAudio = () => {
     window.addEventListener('keydown', handleFirstInteraction, { once: true });
   }
 
-  // 3. 타이머 카운팅 이벤트 발생 시 MP3 최우선 출력
   eventBus.on('TICK', (label: string) => {
     const state = store.getState();
     const voiceType = state.settings?.voiceType || 'male';
