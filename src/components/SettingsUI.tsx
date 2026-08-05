@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { store } from '../core/store';
-import { unlockAudio } from '../modules/audioEngine';
+import { prepareAudioForSession, unlockAudio } from '../modules/audioEngine';
 
 export const SettingsUI: React.FC<{ onStart: () => void }> = ({ onStart }) => {
   const [name, setName] = useState('');
@@ -11,6 +11,9 @@ export const SettingsUI: React.FC<{ onStart: () => void }> = ({ onStart }) => {
 
   const start = () => {
     unlockAudio();
+    if (voiceType !== 'mute') {
+      prepareAudioForSession(voiceType);
+    }
     store.setState(() => ({
       settings: { name, durationMinutes: duration, intervalSeconds, voiceType, sceneId },
       isRunning: true,

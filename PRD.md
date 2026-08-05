@@ -40,14 +40,15 @@
   - 명상 집중 인지용 선명한 텍스트 (`text-white/95`) 및 빛나는 글로우 드롭 섀도우.
 
 ### 3.3. 정밀 오디오 엔진 (Audio Engine)
+- **소스코드 MP3 오디오 파일 출력 무조건 최우선**:
+  - `public/audio` 내의 실제 MP3 음성 파일(`/audio/male/InJoon_*.mp3`, `/audio/female/SunHi_*.mp3`) 출력을 1~2순위 최우선으로 지정.
+  - [1순위] Web Audio API (`AudioBufferSourceNode`) + GainNode(2.5x 증폭) MP3 재생.
+  - [2순위] HTML5 Audio (`new Audio()`) MP3 파일 재생 (실패 시 1회 reload 후 집요하게 재시도).
+  - [3순위 (최후의 보루)] Web Speech API (MP3 오디오 파일이 전혀 응답하지 않는 극단적 네트워크 실패 시에만 정 안 될때 최종 Fallback으로 구동).
 - **오디오 미리 준비 및 프리패치 (Audio Pre-warm & Preload)**:
   - 앱 로드 시 `initAudio()`가 실행되어 `AudioContext` 및 샘플 오디오 리소스를 메모리에 사전 로드.
 - **모바일 오디오 세션 활성화 (Unmute & Session Unlock)**:
-  - 초기 스플래시 터치/클릭, 설정 시작 버튼, 또는 화면 내 전역 첫 터치 시 `AudioContext.resume()` 및 무음 오디오(Web Audio + HTML5 Audio + Web Speech API) 1회 자동 재생으로 모바일 디바이스 오디오 세션을 완전 활성화.
-- **음성 음량 증폭 (Web Audio API Gain Node)**:
-  - 숫자가 출력될 때 음성이 작게 들리지 않도록 Web Audio API `AudioContext` 및 `GainNode`를 활용하여 **숫자 음량을 2.5배(Gain 2.5) 자동 증폭**.
-- **Fallback 시스템**:
-  - 오디오 파일 재생 실패 시 브라우저 내장 `SpeechSynthesisUtterance` (TTS)로 즉시 전환.
+  - 초기 스플래시 터치/클릭, 설정 시작 버튼, 또는 화면 내 전역 첫 터치 시 `AudioContext.resume()` 및 무음 오디오(Web Audio + HTML5 Audio) 1회 자동 재생으로 모바일 디바이스 오디오 세션을 완전 활성화.
 
 ### 3.4. 모바일 화면 꺼짐 방지 (Mobile Wake Lock)
 - **Screen Wake Lock API**: 명상 시작 시 브라우저 screen wake lock을 자동 요청하여 디바이스 화면 꺼짐 방지.
