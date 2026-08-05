@@ -45,9 +45,8 @@ export async function requestWakeLock(): Promise<boolean> {
         wakeLockSentinel = null;
       });
       success = true;
-      console.log('[WakeLock] Screen Wake Lock successfully activated.');
-    } catch (err) {
-      console.warn('[WakeLock] Screen Wake Lock request failed:', err);
+    } catch {
+      // Screen WakeLock이 permissions policy 등에 의해 제한되면 무음 비디오 Fallback으로 자연스럽게 전환
     }
   }
 

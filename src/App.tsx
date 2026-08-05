@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { store } from './core/store';
 import { eventBus } from './core/eventBus';
 import { startMeditation, stopMeditation } from './modules/timerEngine';
-import { initAudio, stopAudio } from './modules/audioEngine';
+import { initAudio, stopAudio, unlockAudio } from './modules/audioEngine';
 import { loadScene } from './modules/sceneManager';
 import { requestWakeLock, releaseWakeLock } from './modules/wakeLock';
 import { SettingsUI } from './components/SettingsUI';
@@ -42,6 +42,7 @@ export default function App() {
   }, []);
 
   const handleStart = () => {
+    unlockAudio();
     const state = store.getState();
     if (state.settings) {
       requestWakeLock();

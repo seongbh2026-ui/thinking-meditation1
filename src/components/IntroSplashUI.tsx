@@ -1,13 +1,19 @@
 import React, { useEffect } from 'react';
+import { unlockAudio } from '../modules/audioEngine';
 
 interface IntroSplashProps {
   onEnter: () => void;
 }
 
 export const IntroSplashUI: React.FC<IntroSplashProps> = ({ onEnter }) => {
+  const handleAction = () => {
+    unlockAudio();
+    onEnter();
+  };
+
   useEffect(() => {
     const handleKeyDown = () => {
-      onEnter();
+      handleAction();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -18,7 +24,7 @@ export const IntroSplashUI: React.FC<IntroSplashProps> = ({ onEnter }) => {
 
   return (
     <div
-      onClick={onEnter}
+      onClick={handleAction}
       className="relative w-full h-screen overflow-hidden flex flex-col items-center justify-center bg-[#05030d]/40 backdrop-blur-sm text-white p-6 cursor-pointer select-none"
     >
       {/* 초화려 파스텔 무지개 빛 오로라 & 회전 3D 만다라 백그라운드 */}

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { store } from '../core/store';
+import { unlockAudio } from '../modules/audioEngine';
 
 export const SettingsUI: React.FC<{ onStart: () => void }> = ({ onStart }) => {
   const [name, setName] = useState('');
@@ -9,6 +10,7 @@ export const SettingsUI: React.FC<{ onStart: () => void }> = ({ onStart }) => {
   const [sceneId, setSceneId] = useState(1);
 
   const start = () => {
+    unlockAudio();
     store.setState(() => ({
       settings: { name, durationMinutes: duration, intervalSeconds, voiceType, sceneId },
       isRunning: true,
