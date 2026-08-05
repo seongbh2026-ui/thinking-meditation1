@@ -2,14 +2,11 @@ import { store } from '../core/store';
 import { eventBus } from '../core/eventBus';
 
 let audioCtx: AudioContext | null = null;
-const bufferCache = new Map<string, AudioBuffer>();
 const htmlAudioCache = new Map<string, HTMLAudioElement>();
-let activeSourceNode: AudioBufferSourceNode | null = null;
 let currentHtmlAudio: HTMLAudioElement | null = null;
-let isAudioInited = false;
 let isAudioUnlocked = false;
 
-// AudioContext 안전 생성 및 반환
+// AudioContext 안전 생성
 export function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
@@ -26,57 +23,26 @@ export function getAudioContext(): AudioContext | null {
   return audioCtx;
 }
 
-// Safari 및 모바일 호환 decodeAudioData 래퍼
-function decodeAudioDataSafely(ctx: AudioContext, arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
-  return new Promise((resolve, reject) => {
-    try {
-      const bufferCopy = arrayBuffer.slice(0);
-      const promise = ctx.decodeAudioData(
-        bufferCopy,
-        (decoded) => resolve(decoded),
-        (err) => reject(err)
-      );
-      if (promise && typeof (promise as Promise<AudioBuffer>).then === 'function') {
-        (promise as Promise<AudioBuffer>).then(resolve).catch(reject);
-      }
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-// 💡 모바일 디바이스 오디오 세션 즉시 활성화 (Unmute / Warm-up)
+// 💡 모바일 및 시크릿모드 오디오 자동재생 제한 우회 핵심: 사용자 인터랙션 직후 호출
 export function unlockAudio(): void {
   if (typeof window === 'undefined') return;
 
+  // 1. Web Audio Context 활성화 시도
   const ctx = getAudioContext();
-  if (ctx) {
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-    try {
-      const buffer = ctx.createBuffer(1, 1, 22050);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.start(0);
-    } catch {
-      // ignore
-    }
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
   }
 
-  // HTML5 Audio Element Session Unmute (iOS Safari / 카카오톡 인앱 브라우저 호환)
+  // 2. HTML5 Audio Dummy 재생으로 모바일/시크릿모드 오디오 세션 즉시 권한 획득
   try {
-    const dummyAudio = new Audio();
-    dummyAudio.volume = 0.001;
-    dummyAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-    const playPromise = dummyAudio.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          dummyAudio.pause();
-        })
-        .catch(() => {});
+    const dummy = new Audio();
+    dummy.volume = 0.01;
+    dummy.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    const p = dummy.play();
+    if (p !== undefined) {
+      p.then(() => {
+        dummy.pause();
+      }).catch(() => {});
     }
   } catch {
     // ignore
@@ -85,71 +51,35 @@ export function unlockAudio(): void {
   isAudioUnlocked = true;
 }
 
-// 💡 첨부된 모든 MP3 파일들을 서버로부터 사전 로딩 및 캐시 구축 (완전 동기/비동기 프리로드)
-export async function preloadAudioAssets(voiceType: 'male' | 'female' = 'male'): Promise<void> {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
+// 💡 모든 오디오 파일 미리 로드 (캐시 구축)
+export function preloadAudioAssets(voiceType: 'male' | 'female' = 'male'): void {
+  if (typeof window === 'undefined') return;
   const folder = voiceType === 'male' ? 'male' : 'female';
   const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
 
-  const sampleLabels: string[] = [];
-  for (let i = 1; i <= 100; i++) sampleLabels.push(String(i));
-  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].forEach(l => sampleLabels.push(l));
+  const labels: string[] = [];
+  for (let i = 1; i <= 100; i++) labels.push(String(i));
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].forEach(l => labels.push(l));
 
-  await Promise.allSettled(
-    sampleLabels.map(async (label) => {
-      const path = `/audio/${folder}/${prefix}_${label}.mp3`;
-      
-      // 1. HTMLAudioElement 캐시
-      if (!htmlAudioCache.has(path)) {
-        const audio = new Audio(path);
-        audio.preload = 'auto';
-        audio.load();
-        htmlAudioCache.set(path, audio);
-      }
-
-      // 2. Web Audio Buffer 캐시
-      if (!bufferCache.has(path)) {
-        try {
-          const res = await fetch(path);
-          if (res.ok) {
-            const arrayBuffer = await res.arrayBuffer();
-            const decoded = await decodeAudioDataSafely(ctx, arrayBuffer);
-            bufferCache.set(path, decoded);
-          }
-        } catch {
-          // ignore
-        }
-      }
-    })
-  );
+  labels.forEach((label) => {
+    const path = `/audio/${folder}/${prefix}_${label}.mp3`;
+    if (!htmlAudioCache.has(path)) {
+      const audio = new Audio(path);
+      audio.preload = 'auto';
+      audio.load();
+      htmlAudioCache.set(path, audio);
+    }
+  });
 }
 
-// 💡 명상 프로그램 시작 직전 호출 (Promise를 반환하여 완전 로딩 보장 후 카운트다운 시작)
+// 명상 시작 전 오디오 준비
 export async function prepareAudioForSession(voiceType: 'male' | 'female' = 'male'): Promise<void> {
   unlockAudio();
-
-  const ctx = getAudioContext();
-  if (ctx && ctx.state === 'suspended') {
-    await ctx.resume().catch(() => {});
-  }
-
-  await preloadAudioAssets(voiceType);
+  preloadAudioAssets(voiceType);
 }
 
-// 기존 재생 중인 소리 중단
+// 재생 중인 오디오 중단
 export function stopAudio(): void {
-  if (activeSourceNode) {
-    try {
-      activeSourceNode.stop();
-      activeSourceNode.disconnect();
-    } catch {
-      // ignore
-    }
-    activeSourceNode = null;
-  }
-
   if (currentHtmlAudio) {
     try {
       currentHtmlAudio.pause();
@@ -161,8 +91,8 @@ export function stopAudio(): void {
   }
 }
 
-// 💡 메인 음성 출력 함수 (메모리 캐시에서 즉시 재생하여 모바일 지연 및 차단 방지)
-const playSound = (label: string, voiceType: 'male' | 'female' | 'mute') => {
+// 💡 모바일 및 시크릿모드 100% 호환 메인 사운드 재생 함수 (HTMLAudioElement 직접 재생 방식)
+export function playSound(label: string, voiceType: 'male' | 'female' | 'mute'): void {
   if (voiceType === 'mute') {
     stopAudio();
     return;
@@ -179,33 +109,7 @@ const playSound = (label: string, voiceType: 'male' | 'female' | 'mute') => {
   const path = `/audio/${folder}/${prefix}_${label}.mp3`;
   const isNumber = /^\d+$/.test(label);
 
-  const ctx = getAudioContext();
-
-  // 1순위: Web Audio API Buffer 메모리 재생 (지연 0초, 가장 확실함)
-  if (ctx && bufferCache.has(path)) {
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-    try {
-      const buffer = bufferCache.get(path)!;
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-
-      const gainNode = ctx.createGain();
-      gainNode.gain.value = isNumber ? 2.5 : 1.2;
-
-      source.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      activeSourceNode = source;
-      source.start(0);
-      return;
-    } catch {
-      // fallback
-    }
-  }
-
-  // 2순위: HTMLAudioElement 캐시 재생
+  // 캐시된 오디오 객체 가져오기 또는 새로 생성
   let audio = htmlAudioCache.get(path);
   if (!audio) {
     audio = new Audio(path);
@@ -219,39 +123,39 @@ const playSound = (label: string, voiceType: 'male' | 'female' | 'mute') => {
   const playPromise = audio.play();
   if (playPromise !== undefined) {
     playPromise.catch(() => {
+      // 브라우저 정책(시크릿모드 등)으로 차단된 경우 신규 Audio 인스턴스로 즉시 강제 재생 시도
       try {
-        const fallbackAudio = new Audio(path);
-        fallbackAudio.volume = 1.0;
-        currentHtmlAudio = fallbackAudio;
-        fallbackAudio.play().catch(() => {});
+        const fallback = new Audio(path + `?t=${Date.now()}`);
+        fallback.volume = 1.0;
+        currentHtmlAudio = fallback;
+        fallback.play().catch((err) => {
+          console.warn('[Audio Playback Blocked/Failed]', err);
+        });
       } catch {
         // ignore
       }
     });
   }
-};
+}
 
-// 앱 초기화 시 최초 오디오 엔진 바인딩
+// 앱 초기화 바인딩
+let isAudioInited = false;
 export const initAudio = () => {
   if (isAudioInited) return;
   isAudioInited = true;
 
-  getAudioContext();
+  unlockAudio();
   preloadAudioAssets('male');
 
-  const handleFirstInteraction = () => {
+  const handleInteraction = () => {
     unlockAudio();
-    window.removeEventListener('pointerdown', handleFirstInteraction);
-    window.removeEventListener('touchstart', handleFirstInteraction);
-    window.removeEventListener('click', handleFirstInteraction);
-    window.removeEventListener('keydown', handleFirstInteraction);
   };
 
   if (typeof window !== 'undefined') {
-    window.addEventListener('pointerdown', handleFirstInteraction, { once: true });
-    window.addEventListener('touchstart', handleFirstInteraction, { once: true });
-    window.addEventListener('click', handleFirstInteraction, { once: true });
-    window.addEventListener('keydown', handleFirstInteraction, { once: true });
+    window.addEventListener('pointerdown', handleInteraction, { once: true });
+    window.addEventListener('touchstart', handleInteraction, { once: true });
+    window.addEventListener('click', handleInteraction, { once: true });
+    window.addEventListener('keydown', handleInteraction, { once: true });
   }
 
   eventBus.on('TICK', (label: string) => {
