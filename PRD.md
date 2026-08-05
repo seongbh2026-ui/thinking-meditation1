@@ -40,6 +40,10 @@
   - 명상 집중 인지용 선명한 텍스트 (`text-white/95`) 및 빛나는 글로우 드롭 섀도우.
 
 ### 3.3. 정밀 오디오 엔진 (Audio Engine)
+- **오디오 미리 준비 및 프리패치 (Audio Pre-warm & Preload)**:
+  - 앱 로드 시 `initAudio()`가 실행되어 `AudioContext` 및 샘플 오디오 리소스를 메모리에 사전 로드.
+- **모바일 오디오 세션 활성화 (Unmute & Session Unlock)**:
+  - 초기 스플래시 터치/클릭, 설정 시작 버튼, 또는 화면 내 전역 첫 터치 시 `AudioContext.resume()` 및 무음 오디오(Web Audio + HTML5 Audio + Web Speech API) 1회 자동 재생으로 모바일 디바이스 오디오 세션을 완전 활성화.
 - **음성 음량 증폭 (Web Audio API Gain Node)**:
   - 숫자가 출력될 때 음성이 작게 들리지 않도록 Web Audio API `AudioContext` 및 `GainNode`를 활용하여 **숫자 음량을 2.5배(Gain 2.5) 자동 증폭**.
 - **Fallback 시스템**:

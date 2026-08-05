@@ -6,8 +6,9 @@ const bufferCache = new Map<string, AudioBuffer>();
 let activeSourceNode: AudioBufferSourceNode | null = null;
 let currentHtmlAudio: HTMLAudioElement | null = null;
 let isAudioInited = false;
+let isAudioUnlocked = false;
 
-// AudioContext 반환 및 생성
+// AudioContext 안전 생성 및 반환
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
@@ -28,7 +29,6 @@ function getAudioContext(): AudioContext | null {
 function decodeAudioDataSafely(ctx: AudioContext, arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
   return new Promise((resolve, reject) => {
     try {
-      // ArrayBuffer 복사본을 생성하여 detachment 문제 방지
       const bufferCopy = arrayBuffer.slice(0);
       const promise = ctx.decodeAudioData(
         bufferCopy,
@@ -44,17 +44,45 @@ function decodeAudioDataSafely(ctx: AudioContext, arrayBuffer: ArrayBuffer): Pro
   });
 }
 
-// 💡 모바일 브라우저 오디오 오토플레이 및 스피커 잠금 해제 (User Gesture에서 호출 필수)
+// 💡 오디오 자원 프리패치 (Pre-warm & Buffer Cache)
+export async function preloadAudioAssets(voiceType: 'male' | 'female' = 'male'): Promise<void> {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const folder = voiceType === 'male' ? 'male' : 'female';
+  const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
+
+  // 자주 쓰이는 가벼운 사운드 샘플들 우선 워밍업
+  const sampleLabels = ['1', '2', '3', '5', '10', 'A', 'B'];
+
+  for (const label of sampleLabels) {
+    const path = `/audio/${folder}/${prefix}_${label}.mp3`;
+    if (bufferCache.has(path)) continue;
+
+    try {
+      const res = await fetch(path);
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && !contentType.includes('text/html')) {
+        const arrayBuffer = await res.arrayBuffer();
+        const decoded = await decodeAudioDataSafely(ctx, arrayBuffer);
+        bufferCache.set(path, decoded);
+      }
+    } catch {
+      // ignore preload errors
+    }
+  }
+}
+
+// 💡 모바일 디바이스 오디오 세션 즉시 활성화 (Unmute / Warm-up / Resume)
 export function unlockAudio(): void {
   if (typeof window === 'undefined') return;
 
-  // 1. Web Audio Context Unlock
+  // 1. Web Audio API Context Resume & Silent Buffer Playback
   const ctx = getAudioContext();
   if (ctx) {
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
-    // 0.001초 무음 버퍼 구동으로 iOS/Android 오디오 드라이버 언락
     try {
       const buffer = ctx.createBuffer(1, 1, 22050);
       const source = ctx.createBufferSource();
@@ -66,35 +94,41 @@ export function unlockAudio(): void {
     }
   }
 
-  // 2. SpeechSynthesis (TTS) Engine Unlock
+  // 2. Web Speech API (SpeechSynthesis) Warm-up
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
-      const dummyUtterance = new SpeechSynthesisUtterance('');
-      dummyUtterance.volume = 0;
+      const dummyUtterance = new SpeechSynthesisUtterance(' ');
+      dummyUtterance.volume = 0.001;
+      dummyUtterance.rate = 2.0;
       window.speechSynthesis.speak(dummyUtterance);
     } catch {
       // ignore
     }
   }
 
-  // 3. HTML5 Audio Element Unlock
+  // 3. HTML5 Audio Element Session Unmute (iOS Safari / 카카오톡 인앱 브라우저 호환)
   try {
     const dummyAudio = new Audio();
-    dummyAudio.volume = 0.01;
+    dummyAudio.volume = 0.001;
+    // 0.01초 짜리 무음 base64 WAV 오디오
     dummyAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-    const p = dummyAudio.play();
-    if (p !== undefined) {
-      p.then(() => {
-        dummyAudio.pause();
-      }).catch(() => {});
+    const playPromise = dummyAudio.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          dummyAudio.pause();
+        })
+        .catch(() => {});
     }
   } catch {
     // ignore
   }
+
+  isAudioUnlocked = true;
 }
 
-// 기존 재생 중인 소리 즉시 중단
+// 기존 재생 중인 소리 중단
 export function stopAudio(): void {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     window.speechSynthesis.cancel();
@@ -121,7 +155,7 @@ export function stopAudio(): void {
   }
 }
 
-// SpeechSynthesis Fallback (모든 오디오 파일 실패 시 최종 보장)
+// SpeechSynthesis Fallback
 const playSpeechFallback = (label: string, isAlphabet: boolean) => {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
   stopAudio();
@@ -136,7 +170,7 @@ const playSpeechFallback = (label: string, isAlphabet: boolean) => {
   window.speechSynthesis.speak(utterance);
 };
 
-// HTML5 Audio Fallback 재생
+// HTML5 Audio Fallback
 const playHtmlAudioFallback = (path: string, label: string, isAlphabet: boolean) => {
   stopAudio();
   const audio = new Audio(path);
@@ -162,7 +196,7 @@ const playHtmlAudioFallback = (path: string, label: string, isAlphabet: boolean)
   }
 };
 
-// 메인 사운드 재생 로직 (Web Audio API 우선 -> HTML5 Audio -> SpeechSynthesis)
+// 메인 음성 출력 함수 (Web Audio API 2.5x 증폭 -> HTML5 Audio -> Web Speech API)
 const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') => {
   if (voiceType === 'mute') {
     stopAudio();
@@ -170,6 +204,11 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
   }
 
   stopAudio();
+
+  // 아직 사용자 액션으로 오디오락이 풀리지 않은 경우 자동 언락 시도
+  if (!isAudioUnlocked) {
+    unlockAudio();
+  }
 
   const folder = voiceType === 'male' ? 'male' : 'female';
   const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
@@ -179,7 +218,7 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
 
   const ctx = getAudioContext();
 
-  // 1. Web Audio API로 원활하게 재생 시도
+  // 1. Web Audio API로 정밀 재생
   if (ctx) {
     if (ctx.state === 'suspended') {
       try {
@@ -194,7 +233,6 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
       if (!buffer) {
         const res = await fetch(path);
         const contentType = res.headers.get('content-type') || '';
-        // HTML SPA 404 페이지 응답인 경우 예외 발생시켜 HTML5 Audio/TTS Fallback으로 전달
         if (!res.ok || contentType.includes('text/html')) {
           throw new Error(`Invalid audio response: ${res.status}`);
         }
@@ -206,7 +244,7 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
       const source = ctx.createBufferSource();
       source.buffer = buffer;
 
-      // 숫자일 경우 2.5배 음량 증폭 GainNode 연결
+      // 숫자 음성일 경우 2.5배 음량 증폭 GainNode 적용
       const gainNode = ctx.createGain();
       gainNode.gain.value = isNumber ? 2.5 : 1.2;
 
@@ -217,18 +255,40 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
       source.start(0);
       return;
     } catch {
-      // Web Audio API 디코딩/패치 실패 시 콘솔에 노란 경고창 대신 즉시 HTML5 Audio Fallback으로 전환
+      // Web Audio 재생 실패 시 HTML5 Audio로 전이
     }
   }
 
-  // 2. Web Audio API 실패 시 HTML5 Audio Fallback
+  // 2. HTML5 Audio Fallback
   playHtmlAudioFallback(path, label, isAlphabet);
 };
 
+// 💡 웹 앱 초기화 시 오디오 엔진 준비 & 전역 첫 클릭/터치 언락 이벤트 바인딩
 export const initAudio = () => {
   if (isAudioInited) return;
   isAudioInited = true;
 
+  // 1. 미리 AudioContext 객체 준비 & 샘플 사운드 워밍업
+  getAudioContext();
+  preloadAudioAssets('male');
+
+  // 2. 사용자가 화면 내 어디든 첫 터치/클릭하는 순간 오디오 세션 활성화
+  const handleFirstInteraction = () => {
+    unlockAudio();
+    window.removeEventListener('pointerdown', handleFirstInteraction);
+    window.removeEventListener('touchstart', handleFirstInteraction);
+    window.removeEventListener('click', handleFirstInteraction);
+    window.removeEventListener('keydown', handleFirstInteraction);
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', handleFirstInteraction, { once: true });
+    window.addEventListener('touchstart', handleFirstInteraction, { once: true });
+    window.addEventListener('click', handleFirstInteraction, { once: true });
+    window.addEventListener('keydown', handleFirstInteraction, { once: true });
+  }
+
+  // 3. 타이머 카운팅 이벤트 수신 시 음성 출력
   eventBus.on('TICK', (label: string) => {
     const state = store.getState();
     const voiceType = state.settings?.voiceType || 'male';
