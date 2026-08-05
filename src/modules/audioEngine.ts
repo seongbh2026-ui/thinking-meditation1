@@ -1,97 +1,92 @@
+import { Howl, Howler } from 'howler';
 import { store } from '../core/store';
 import { eventBus } from '../core/eventBus';
 
-let audioCtx: AudioContext | null = null;
-const htmlAudioCache = new Map<string, HTMLAudioElement>();
-let currentHtmlAudio: HTMLAudioElement | null = null;
+let maleHowl: Howl | null = null;
+let femaleHowl: Howl | null = null;
 let isAudioUnlocked = false;
 
-// AudioContext 안전 생성
-export function getAudioContext(): AudioContext | null {
-  if (typeof window === 'undefined') return null;
-  if (!audioCtx) {
-    const AudioContextClass =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (AudioContextClass) {
-      audioCtx = new AudioContextClass();
-    }
-  }
-  if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(() => {});
-  }
-  return audioCtx;
-}
-
-// 💡 모바일 및 시크릿모드 오디오 자동재생 제한 우회 핵심: 사용자 인터랙션 직후 호출
+// Howler 오디오 컨텍스트 언락 (모바일 / 시크릿모드 대응)
 export function unlockAudio(): void {
   if (typeof window === 'undefined') return;
-
-  // 1. Web Audio Context 활성화 시도
-  const ctx = getAudioContext();
-  if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-
-  // 2. HTML5 Audio Dummy 재생으로 모바일/시크릿모드 오디오 세션 즉시 권한 획득
   try {
-    const dummy = new Audio();
-    dummy.volume = 0.01;
-    dummy.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-    const p = dummy.play();
-    if (p !== undefined) {
-      p.then(() => {
-        dummy.pause();
-      }).catch(() => {});
+    if (Howler.ctx && Howler.ctx.state === 'suspended') {
+      Howler.ctx.resume().catch(() => {});
     }
+    // 더미 재생으로 사용자 인터랙션 권한 획득 확인
+    const silentAudio = new Audio();
+    silentAudio.volume = 0.001;
+    silentAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    silentAudio.play().then(() => silentAudio.pause()).catch(() => {});
   } catch {
     // ignore
   }
-
   isAudioUnlocked = true;
 }
 
-// 💡 모든 오디오 파일 미리 로드 (캐시 구축)
-export function preloadAudioAssets(voiceType: 'male' | 'female' = 'male'): void {
-  if (typeof window === 'undefined') return;
-  const folder = voiceType === 'male' ? 'male' : 'female';
-  const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
+// Audio Sprite 파일 및 JSON 사전 로딩
+export async function preloadAudioAssets(voiceType: 'male' | 'female' = 'male'): Promise<void> {
+  unlockAudio();
 
-  const labels: string[] = [];
-  for (let i = 1; i <= 100; i++) labels.push(String(i));
-  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].forEach(l => labels.push(l));
-
-  labels.forEach((label) => {
-    const path = `/audio/${folder}/${prefix}_${label}.mp3`;
-    if (!htmlAudioCache.has(path)) {
-      const audio = new Audio(path);
-      audio.preload = 'auto';
-      audio.load();
-      htmlAudioCache.set(path, audio);
+  return new Promise((resolve) => {
+    if (voiceType === 'male') {
+      if (maleHowl) {
+        resolve();
+        return;
+      }
+      fetch('/audio/male_sprite.json')
+        .then((res) => res.json())
+        .then((sprite) => {
+          maleHowl = new Howl({
+            src: ['/audio/male_sprite.mp3'],
+            sprite: sprite,
+            html5: false,
+            preload: true,
+            onload: () => resolve(),
+            onloaderror: () => resolve(),
+          });
+        })
+        .catch(() => resolve());
+    } else {
+      if (femaleHowl) {
+        resolve();
+        return;
+      }
+      fetch('/audio/female_sprite.json')
+        .then((res) => res.json())
+        .then((sprite) => {
+          femaleHowl = new Howl({
+            src: ['/audio/female_sprite.mp3'],
+            sprite: sprite,
+            html5: false,
+            preload: true,
+            onload: () => resolve(),
+            onloaderror: () => resolve(),
+          });
+        })
+        .catch(() => resolve());
     }
   });
 }
 
-// 명상 시작 전 오디오 준비
+// 세션 시작 전 오디오 준비
 export async function prepareAudioForSession(voiceType: 'male' | 'female' = 'male'): Promise<void> {
   unlockAudio();
-  preloadAudioAssets(voiceType);
+  await preloadAudioAssets(voiceType);
 }
 
-// 재생 중인 오디오 중단
+// 오디오 중단
 export function stopAudio(): void {
-  if (currentHtmlAudio) {
-    try {
-      currentHtmlAudio.pause();
-      currentHtmlAudio.currentTime = 0;
-    } catch {
-      // ignore
-    }
-    currentHtmlAudio = null;
+  if (maleHowl) maleHowl.stop();
+  if (femaleHowl) femaleHowl.stop();
+  try {
+    Howler.stop();
+  } catch {
+    // ignore
   }
 }
 
-// 💡 모바일 및 시크릿모드 100% 호환 메인 사운드 재생 함수 (HTMLAudioElement 직접 재생 방식)
+// Howler.js Audio Sprite를 이용한 사운드 재생 (지연 없는 즉각 반응)
 export function playSound(label: string, voiceType: 'male' | 'female' | 'mute'): void {
   if (voiceType === 'mute') {
     stopAudio();
@@ -99,46 +94,35 @@ export function playSound(label: string, voiceType: 'male' | 'female' | 'mute'):
   }
 
   stopAudio();
+  unlockAudio();
 
-  if (!isAudioUnlocked) {
-    unlockAudio();
-  }
-
-  const folder = voiceType === 'male' ? 'male' : 'female';
-  const prefix = voiceType === 'male' ? 'InJoon' : 'SunHi';
-  const path = `/audio/${folder}/${prefix}_${label}.mp3`;
+  const howlInstance = voiceType === 'male' ? maleHowl : femaleHowl;
   const isNumber = /^\d+$/.test(label);
+  const volume = isNumber ? 1.0 : 0.9;
 
-  // 캐시된 오디오 객체 가져오기 또는 새로 생성
-  let audio = htmlAudioCache.get(path);
-  if (!audio) {
-    audio = new Audio(path);
-    htmlAudioCache.set(path, audio);
-  }
-
-  audio.currentTime = 0;
-  audio.volume = isNumber ? 1.0 : 0.9;
-  currentHtmlAudio = audio;
-
-  const playPromise = audio.play();
-  if (playPromise !== undefined) {
-    playPromise.catch(() => {
-      // 브라우저 정책(시크릿모드 등)으로 차단된 경우 신규 Audio 인스턴스로 즉시 강제 재생 시도
-      try {
-        const fallback = new Audio(path + `?t=${Date.now()}`);
-        fallback.volume = 1.0;
-        currentHtmlAudio = fallback;
-        fallback.play().catch((err) => {
-          console.warn('[Audio Playback Blocked/Failed]', err);
-        });
-      } catch {
-        // ignore
+  if (howlInstance) {
+    try {
+      const soundId = howlInstance.play(label);
+      howlInstance.volume(volume, soundId);
+    } catch (err) {
+      console.warn('[AudioSprite Play Error]:', err);
+    }
+  } else {
+    // 아직 로드되지 않은 경우 로드 후 재생
+    preloadAudioAssets(voiceType).then(() => {
+      const inst = voiceType === 'male' ? maleHowl : femaleHowl;
+      if (inst) {
+        try {
+          const soundId = inst.play(label);
+          inst.volume(volume, soundId);
+        } catch {
+          // ignore
+        }
       }
     });
   }
 }
 
-// 앱 초기화 바인딩
 let isAudioInited = false;
 export const initAudio = () => {
   if (isAudioInited) return;
@@ -146,6 +130,7 @@ export const initAudio = () => {
 
   unlockAudio();
   preloadAudioAssets('male');
+  preloadAudioAssets('female');
 
   const handleInteraction = () => {
     unlockAudio();
