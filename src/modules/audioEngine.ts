@@ -134,6 +134,9 @@ export function unlockAudio(): void {
 
 // 💡 명상 프로그램 실행 시 오디오 엔진 전면 재초기화 및 서버 동기화
 export function prepareAudioForSession(voiceType: 'male' | 'female' = 'male'): void {
+  // 0. 기존 오디오 캐시 전면 초기화 (이전 세션의 찌꺼기 방지)
+  bufferCache.clear();
+
   // 1. 오디오 세션 언락
   unlockAudio();
 
@@ -201,8 +204,9 @@ const playHtmlAudioFallback = (path: string, label: string, isAlphabet: boolean)
   const handleFailure = () => {
     if (!retryAttempted) {
       retryAttempted = true;
-      // MP3 파일 재생 1회 재시도
+      // MP3 파일 재생 1회 재시도 (캐시 우회 쿼리스트링 추가)
       try {
+        audio.src = `${path}?t=${Date.now()}`;
         audio.load();
         const pRetry = audio.play();
         if (pRetry !== undefined) {
@@ -265,7 +269,13 @@ const playSound = async (label: string, voiceType: 'male' | 'female' | 'mute') =
     try {
       let buffer = bufferCache.get(path);
       if (!buffer) {
-        const res = await fetch(path);
+        let res = await fetch(path);
+        
+        // 1차 패치 실패 시 캐시 무시(Bypass Cache) 옵션으로 강력하게 재요청
+        if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) {
+          res = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-cache' });
+        }
+
         const contentType = res.headers.get('content-type') || '';
         if (!res.ok || contentType.includes('text/html')) {
           throw new Error(`Invalid audio response: ${res.status}`);
